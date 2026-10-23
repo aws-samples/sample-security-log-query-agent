@@ -76,10 +76,25 @@ npm install
 npm run build      # tsc
 ```
 
-Bundle any authorizer dependencies into the authorizer Lambda asset directory
-(pip install into the asset dir, or use a Lambda layer) before deploy. The
-api-handler uses only the standard library + `boto3` (present in the Lambda
-runtime), so it needs no bundling.
+Bundle each Lambda's dependencies into its asset directory (pip install into
+the asset dir, or use a Lambda layer) before deploy, per each directory's
+`requirements.txt`:
+
+- `lambda/authorizer` -- PyJWT + cryptography (JWT validation).
+- `lambda/api-handler` -- sqlglot (SQL statement parsing/validation). `boto3`
+  is already present in the Lambda runtime.
+
+### Run the unit tests
+
+The unit tests cover the two security-critical controls: the read-only SQL guard
+and the authorizer fail-closed path. They stub `boto3` and `PyJWT`, so they need
+only the test dependencies and reach no AWS services.
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r tests/requirements.txt
+pytest tests/ -q
+```
 
 ---
 

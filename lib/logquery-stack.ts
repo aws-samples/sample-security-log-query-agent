@@ -50,7 +50,7 @@ export interface LogQueryStackProps extends cdk.StackProps {
  *                -> cross-account read of the Landing Zone central log bucket (Log Archive).
  *
  * Three enforcement layers hold: edge (OIDC + group claim at the authorizer), IAM
- * (a read-only role with NO write actions, scoped to the workgroup/catalog/bucket/key),
+ * (a read-only role with no write actions on the log data, scoped to the workgroup/catalog/bucket/key),
  * and data (locked-down Athena workgroup + cross-account bucket/Glue resource policies).
  * Lake Formation is intentionally not used (unavailable in the GovCloud/IL5 variant, so
  * the pattern stays partition-portable).
@@ -116,7 +116,11 @@ export class LogQueryStack extends cdk.Stack {
       parameters: { 'catalog-id': logArchive },
     });
 
-    // ---- Read-only agent execution role (NO write actions anywhere) ----
+    // ---- Read-only agent execution role (no write actions on the log data) ----
+    // The role has read-only access to the log sources (Glue catalog, central log
+    // bucket, CMK) and Athena query actions. The only read/write grant is on the
+    // private, transient Athena results-staging bucket below, which holds no source
+    // log data and is fully reproducible by re-running the query.
     const logRole = new iam.Role(this, 'LogAgentExecRole', {
       roleName: props.roleName,
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),

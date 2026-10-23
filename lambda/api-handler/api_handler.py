@@ -24,6 +24,8 @@ import time
 import uuid
 
 import boto3
+import sqlglot
+from sqlglot import expressions as exp
 
 MODEL_ID = os.environ["MODEL_ID"]
 WORKGROUP = os.environ["ATHENA_WORKGROUP"]
@@ -34,8 +36,32 @@ MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS", "6"))
 bedrock = boto3.client("bedrock-runtime")
 athena = boto3.client("athena")
 
-_READONLY_PREFIXES = ("select", "with")
-_FORBIDDEN = ("insert", "update", "delete", "drop", "alter", "create", "grant", "revoke", "msck", "unload")
+# Athena/Trino uses the Presto SQL dialect; parse with that so our structural
+# check matches what the engine will actually run.
+_SQL_DIALECT = "presto"
+
+
+def _is_readonly_sql(sql: str) -> bool:
+    """Return True only for a SINGLE read-only (SELECT/WITH) statement.
+
+    AST-based, not substring matching: this rejects multi-statement input
+    (e.g. a trailing "; DROP TABLE ..."), and never false-positives on a
+    forbidden word that appears inside an identifier or string literal.
+    """
+    try:
+        statements = sqlglot.parse(sql, read=_SQL_DIALECT)
+    except Exception:  # noqa: BLE001 - any parse failure is treated as unsafe
+        return False
+
+    # Exactly one non-empty statement is allowed.
+    statements = [s for s in statements if s is not None]
+    if len(statements) != 1:
+        return False
+
+    root = statements[0]
+    # The only read-only top-level forms. A WITH (CTE) that wraps a SELECT
+    # parses to a Select whose `with` arg is populated, so Select covers both.
+    return isinstance(root, exp.Select)
 
 # System prompt describes the four base log tables so the model can generate SQL.
 # Keep table/column facts here; the model needs schema to be accurate.
@@ -92,9 +118,8 @@ TOOL_CONFIG = {
 def _run_athena(sql):
     """Execute a read-only query. Returns {'rows': [...]} or {'error': '...'}."""
     sql = (sql or "").strip().rstrip(";")
-    lowered = sql.lower()
-    if not lowered.startswith(_READONLY_PREFIXES) or any(f in lowered.split() for f in _FORBIDDEN):
-        return {"error": "Only read-only SELECT queries are permitted."}
+    if not _is_readonly_sql(sql):
+        return {"error": "Only a single read-only SELECT query is permitted."}
     try:
         qid = athena.start_query_execution(
             QueryString=sql,

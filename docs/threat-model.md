@@ -43,14 +43,14 @@ separately in `ARCHITECTURE.md`.
 
 | # | STRIDE | Priority | Threat | Mitigations | Residual |
 |---|--------|----------|--------|-------------|----------|
-| T1 | Tampering | Medium | Analyst or prompt-injection coerces the model into proposing a mutating/destructive SQL statement | Handler SQL guard (SELECT/WITH only, forbidden-token reject); read-only IAM role with no write actions; locked-down Athena workgroup | Low: three independent layers; the IAM role alone makes mutation impossible |
+| T1 | Tampering | Medium | Analyst or prompt-injection coerces the model into proposing a mutating/destructive SQL statement | Handler SQL guard (AST parse via sqlglot: exactly one statement, SELECT/WITH only, rejects multi-statement and non-SELECT forms); read-only IAM role with no write actions; locked-down Athena workgroup | Low: three independent layers; the IAM role alone makes mutation impossible |
 | T2 | Spoofing / Elevation | Medium | Unauthorized actor without a valid group-claim token reaches the query API | OIDC authorizer (signature, issuer, audience, expiry + required group claim); PRIVATE API Gateway with optional VPCE pin | Low: 5-min authorizer cache means a revoked token stays valid up to TTL; acceptable and documented |
-| T3 | Information Disclosure | Low | Agent role over-scoped, reaches data beyond the central logs | All statements ARN-scoped (workgroup, catalog/db/tables, one bucket, log CMK, model ARNs); remaining wildcards object-level or read-only, documented in nag-suppressions | Low: role cannot reach any other bucket, catalog, or key |
+| T3 | Information Disclosure | Low | Agent role over-scoped, reaches data beyond the central logs | All statements ARN-scoped (workgroup, catalog/db/tables, one bucket, log CMK, model ARNs); remaining wildcards object-level or read-only, documented in nag-suppressions | Low: role cannot reach any other bucket, catalog, or key. The `kms:Decrypt` `Resource: '*'` in the Log Archive grant is constrained by `aws:PrincipalOrgID`; the deployer should scope it to the specific central-log CMK ARN when applying it to the key policy |
 | T4 | Information Disclosure | Low | Authorized analyst issues broad queries over sensitive logs | Group-claim gate (analyst is already entitled); MaxResults=100 + system-prompt LIMIT and time filters | Accepted: read access to data the group is entitled to; control is membership, not query shape |
 | T5 | Spoofing | Medium | JWKS discovery / token validation weakness | HTTPS-fixed issuer, RS256 pinned (no alg:none), issuer/audience/expiry required, keys cached | Depends on IdP trust (assumption 2); deployer sets issuer/audience/group correctly, documented |
 | T6 | Information Disclosure | Low | Query-results bucket exposes staged output | Block Public Access ALL, enforceSSL, versioning, SSE-S3, server access logging | Low: transient staging output, reproducible; private bucket. SSE-S3 vs CMK is a documented sample simplification |
 | T7 | Tampering / compliance | Low | Deployer selects an unentitled/unapproved/untrusted model | First-party Bedrock Converse (no 3rd-party GenAI, no bundled dataset); invoke scoped to inference-profile/foundation-model ARNs; GovCloud FIPS endpoint | Out of scope for the sample: model choice/entitlement is the deployer's responsibility (assumption 4) |
-| T8 | Denial of Service | Low | Repeated/expensive questions drive unbounded loops or large scans | MAX_TOOL_TURNS=6, bounded Athena poll (~50s), 120s Lambda timeout, Converse maxTokens=1024/temperature=0; group-gated surface | Low: non-partitioned demo tables mean full scans; partition projection flagged as a production step |
+| T8 | Denial of Service | Low | Repeated/expensive questions drive unbounded loops or large scans | MAX_TOOL_TURNS=6, bounded Athena poll (~50s), 120s Lambda timeout, Converse maxTokens=1024/temperature=0; group-gated surface | Low: `MaxResults=100` caps rows returned, not rows scanned, and the system-prompt LIMIT is advisory (a model may omit it). Non-partitioned demo tables mean a crafted question can drive a full scan. Production mitigations: partition projection and an Athena workgroup data-scanned cutoff (bytes-scanned control), flagged as a deployment step |
 
 ## Did we do a good enough job
 
@@ -60,7 +60,9 @@ Every threat is tied to one or more implemented mitigations present in the commi
 (`lib/nag-suppressions.ts`). The two items marked accepted/out-of-scope (T4 analyst
 entitlement, T7 model choice) are deliberate boundaries of a reference sample, not gaps.
 cdk-nag (AwsSolutions + NIST 800-53 R5) and npm audit run clean with suppressions
-documented per rule; see `../security-scans/`.
+documented per rule; see `../security-scans/`. The two security-critical controls
+(the read-only SQL guard behind T1 and the authorizer fail-closed path behind T2)
+are pinned by unit tests in `../tests/`.
 
 This is a live document: update it as the sample evolves, and re-review the GovCloud/IL5
 ingress deltas (CNAP, WAF, Network Firewall) if that variant is built out.
