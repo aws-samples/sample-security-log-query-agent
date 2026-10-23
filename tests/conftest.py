@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """Shared pytest fixtures and import shims for the Lambda unit tests.
 
 The Lambda modules read required environment variables and create boto3 clients

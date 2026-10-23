@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """Tests for the API handler's read-only SQL guard (`_is_readonly_sql`).
 
 The guard is the control that keeps the query path read-only at the application

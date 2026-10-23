@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """Security Log Query Agent - API handler Lambda.
 
 Natural-language -> read-only Athena SQL over a centralized security-log catalog,

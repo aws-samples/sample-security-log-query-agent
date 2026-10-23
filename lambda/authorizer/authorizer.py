@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """API Gateway TOKEN authorizer - validates an OIDC JWT and gates on a group claim.
 
 Generalized, IdP-agnostic reference implementation. Works with any standards

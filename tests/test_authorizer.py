@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """Tests for the OIDC TOKEN authorizer's fail-closed behavior.
 
 A code review flagged that a missing `methodArn` must not default to a wildcard
