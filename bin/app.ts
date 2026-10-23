@@ -80,7 +80,7 @@ const apiResourcePolicySourceVpce = app.node.tryGetContext('apiResourcePolicySou
   | undefined;
 
 // Main app stack -> query account.
-const queryStack = new LogQueryStack(app, 'SecurityLogQueryStack', {
+const queryStack = new LogQueryStack(app, 'SecurityLogQuery-App', {
   env: { account: queryAccount, region },
   queryAccount,
   logArchiveAccount,
@@ -102,7 +102,7 @@ const queryStack = new LogQueryStack(app, 'SecurityLogQueryStack', {
 });
 
 // Cross-account grant stack -> log archive account (data owner).
-const grantStack = new LogArchiveGrantStack(app, 'SecurityLogArchiveGrantStack', {
+const grantStack = new LogArchiveGrantStack(app, 'SecurityLogQuery-LogArchiveGrants', {
   env: { account: logArchiveAccount, region },
   logArchiveAccount,
   queryAccount,

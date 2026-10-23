@@ -40,6 +40,11 @@ REQUIRED_GROUP = os.environ["REQUIRED_GROUP"].strip()
 # Claims that different IdPs use to carry group/role membership.
 _GROUP_CLAIMS = ("groups", "roles", "cognito:groups")
 
+# Resource used on a Deny when no methodArn is present. API Gateway requires a
+# non-empty resource string; this sentinel grants nothing and avoids a "*".
+# Partition-neutral (arn:*) so it is correct in commercial and GovCloud alike.
+DENY_RESOURCE = "arn:*:execute-api:*:*:*/*/*/deny"
+
 
 def _resolve_jwks_uri() -> str:
     """Return the JWKS URI: explicit env, else OIDC discovery, else the conventional path."""
@@ -66,7 +71,14 @@ _jwk_client = PyJWKClient(_resolve_jwks_uri())
 
 def handler(event, _context):
     token = _extract_token(event)
-    method_arn = event.get("methodArn", "*")
+
+    # Fail closed: a TOKEN authorizer event must carry methodArn. If it is absent
+    # the request is malformed, so deny against the narrowest possible resource
+    # rather than defaulting to "*" (which would scope an Allow to every method).
+    method_arn = event.get("methodArn")
+    if not method_arn:
+        print("Authorizer event missing methodArn; denying")
+        return _policy("unauthorized", "Deny", DENY_RESOURCE)
 
     try:
         signing_key = _jwk_client.get_signing_key_from_jwt(token)
