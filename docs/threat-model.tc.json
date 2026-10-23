@@ -1,0 +1,259 @@
+{
+  "schema": 1,
+  "applicationInfo": {
+    "name": "Security Log Query Agent",
+    "description": "### Overview\n\nA serverless, read-only, natural-language-to-SQL assistant over a centralized security log archive. An analyst asks a plain-English question; a foundation model (Amazon Bedrock Converse API with tool use) proposes ONE read-only Athena SQL query; a dedicated read-only IAM role runs it against the Landing Zone Accelerator (LZA) central security-log Glue catalog in a dedicated Log Archive account, and the model summarizes the returned rows plus the exact SQL it ran.\n\n### Scope\n\nThis threat model covers the commercial mainline variant: private API Gateway (PRIVATE endpoint) -> OIDC TOKEN Lambda authorizer -> API handler Lambda (Converse agent loop) -> Athena locked-down workgroup -> cross-account Glue Data Catalog + central-log S3/KMS in the Log Archive account. The GovCloud/IL5 ingress variant (CNAP: ALB + WAF -> Transit Gateway -> Network Firewall -> internal ALB) adds ingress threats documented separately.\n\n### Key security property\n\nThe model holds no credentials and takes no action; it only proposes SQL. Authorization is enforced deterministically in code and IAM, not by the model. Read-only is guaranteed at three independent layers (handler SQL guard, read-only IAM role, locked-down Athena workgroup).\n\n### Published as\n\nAn AWS Prescriptive Guidance reference sample (MIT-0), explicitly not production-hardened, shipping with no customer data and no hardcoded account or organization IDs."
+  },
+  "assumptions": [
+    {
+      "id": "339a8e0b-93a3-42a3-8a9e-6524c11a5722",
+      "numericId": 1,
+      "content": "The LZA / Control Tower landing zone already delivers CloudTrail, VPC Flow Logs, GuardDuty, and Network Firewall logs to the central S3 bucket in a dedicated Log Archive account. This sample does not create or own that log data."
+    },
+    {
+      "id": "35270dbc-6683-4a9a-bc46-2be60b8421fb",
+      "numericId": 2,
+      "content": "The OIDC identity provider (e.g. Entra ID, Amazon Cognito, Okta) is trusted, issues correctly scoped group claims, and publishes a valid JWKS document over HTTPS."
+    },
+    {
+      "id": "fef04af4-b07b-46d6-ade5-2b893c2c7a5f",
+      "numericId": 3,
+      "content": "The central log bucket and its KMS CMK are LZA-managed; cross-account grants are applied through LZA config and the LZA pipeline, not attached out of band."
+    },
+    {
+      "id": "6b68c734-a59b-472d-97cd-d9c2705c01d9",
+      "numericId": 4,
+      "content": "The deployer supplies a Bedrock model ID or inference-profile ID that is entitled in the target account and on the AWS-approved model list for their partition and compliance regime."
+    },
+    {
+      "id": "62a0c0cb-d575-41b9-a547-91471825547e",
+      "numericId": 5,
+      "content": "This is a reference sample (MIT-0) explicitly documented as not production-hardened. A production deployment reviews and tightens IAM, network, encryption, and data controls against its own requirements before using real data."
+    }
+  ],
+  "threats": [
+    {
+      "id": "aa0bab79-9c66-4146-aa17-744c62ab8e36",
+      "numericId": 1,
+      "threatSource": "an authenticated analyst or a prompt-injection payload in the question",
+      "prerequisites": "able to influence the natural-language question sent to the model",
+      "threatAction": "coerce the foundation model into proposing a mutating or destructive SQL statement (INSERT/UPDATE/DELETE/DROP/ALTER)",
+      "threatImpact": "tampering with or destruction of the central security log data",
+      "impactedGoal": ["integrity"],
+      "impactedAssets": ["central security log data"],
+      "statement": "An authenticated analyst or a prompt-injection payload in the question able to influence the natural-language question sent to the model can coerce the foundation model into proposing a mutating or destructive SQL statement (INSERT/UPDATE/DELETE/DROP/ALTER), which leads to tampering with or destruction of the central security log data, resulting in reduced integrity of the central security log data",
+      "metadata": [
+        {"key": "STRIDE", "value": ["T"]},
+        {"key": "Priority", "value": "Medium"},
+        {"key": "Comments", "value": "Defended at three independent layers: the handler rejects any SQL not starting with SELECT/WITH or containing a forbidden token; the read-only IAM role has no write actions anywhere; the Athena workgroup enforces its configuration. The IAM role alone makes mutation impossible. Residual risk: low."}
+      ],
+      "tags": ["read-only-guarantee", "prompt-injection"]
+    },
+    {
+      "id": "c673ebf5-ede9-4a99-81e0-c18f3891f7d9",
+      "numericId": 2,
+      "threatSource": "an unauthorized internal or external actor",
+      "prerequisites": "without a valid OIDC token carrying the required security group claim",
+      "threatAction": "reach the query API and invoke the agent",
+      "threatImpact": "unauthorized access to centralized security log data",
+      "impactedGoal": ["confidentiality"],
+      "impactedAssets": ["central security log data", "query API"],
+      "statement": "An unauthorized internal or external actor without a valid OIDC token carrying the required security group claim can reach the query API and invoke the agent, which leads to unauthorized access to centralized security log data, resulting in reduced confidentiality of the central security log data",
+      "metadata": [
+        {"key": "STRIDE", "value": ["S", "E"]},
+        {"key": "Priority", "value": "Medium"},
+        {"key": "Comments", "value": "TOKEN Lambda authorizer validates JWT signature (RS256), issuer, audience, and expiry, and requires the designated group claim before the handler is reached. API Gateway is a PRIVATE endpoint with an optional resource-policy pin to a specific VPC endpoint. Residual: 5-minute authorizer result cache means a revoked token stays valid up to the TTL; acceptable for a read-only path and documented."}
+      ],
+      "tags": ["edge-authorization"]
+    },
+    {
+      "id": "6879d93a-a3c1-4566-8e83-3c532c46ace6",
+      "numericId": 3,
+      "threatSource": "the agent execution role",
+      "prerequisites": "if its cross-account grants were scoped too broadly",
+      "threatAction": "read AWS data beyond the central security logs (other buckets, catalogs, or keys)",
+      "threatImpact": "unauthorized disclosure of data outside the intended log scope",
+      "impactedGoal": ["confidentiality"],
+      "impactedAssets": ["log archive account data"],
+      "statement": "The agent execution role if its cross-account grants were scoped too broadly can read AWS data beyond the central security logs (other buckets, catalogs, or keys), which leads to unauthorized disclosure of data outside the intended log scope, resulting in reduced confidentiality of log archive account data",
+      "metadata": [
+        {"key": "STRIDE", "value": ["I"]},
+        {"key": "Priority", "value": "Low"},
+        {"key": "Comments", "value": "Every statement on securitylogagent-exec-role is ARN-scoped: Athena to the one workgroup + data catalog, Glue to the one database/tables, S3 to the single central-log bucket, KMS Decrypt to the log CMK. Remaining wildcards are object-level (bucket/*, table/*) or read-action families on already-scoped resources, documented per-rule in nag-suppressions.ts (IAM5). The role cannot reach any other bucket, catalog, or key. Residual risk: low."}
+      ],
+      "tags": ["iam-isolation"]
+    },
+    {
+      "id": "cb6b0f48-10fe-4da5-b68d-10ce7330a722",
+      "numericId": 4,
+      "threatSource": "an authorized analyst",
+      "prerequisites": "with a valid group claim",
+      "threatAction": "issue broad queries that return large volumes of sensitive log content",
+      "threatImpact": "over-exposure of security log detail to an entitled but curious user",
+      "impactedGoal": ["confidentiality"],
+      "impactedAssets": ["central security log data"],
+      "statement": "An authorized analyst with a valid group claim can issue broad queries that return large volumes of sensitive log content, which leads to over-exposure of security log detail to an entitled but curious user, resulting in reduced confidentiality of the central security log data",
+      "metadata": [
+        {"key": "STRIDE", "value": ["I"]},
+        {"key": "Priority", "value": "Low"},
+        {"key": "Comments", "value": "In-scope by design: this is read access to data the designated security-analyst group is already entitled to see. The control is group membership, not query shape. Results are capped (MaxResults=100) and the system prompt enforces a default LIMIT and time filters. Residual risk accepted."}
+      ],
+      "tags": ["authorized-access"]
+    },
+    {
+      "id": "95b0fff0-9583-4ea2-9e0a-1ed103bfa612",
+      "numericId": 5,
+      "threatSource": "an actor",
+      "prerequisites": "in a position to tamper with JWKS discovery or present a forged token",
+      "threatAction": "defeat token validation (algorithm confusion, wrong issuer/audience, expired token)",
+      "threatImpact": "authentication bypass at the edge authorizer",
+      "impactedGoal": ["confidentiality", "integrity"],
+      "impactedAssets": ["query API", "central security log data"],
+      "statement": "An actor in a position to tamper with JWKS discovery or present a forged token can defeat token validation (algorithm confusion, wrong issuer/audience, expired token), which leads to authentication bypass at the edge authorizer, resulting in reduced confidentiality and integrity of the query API and central security log data",
+      "metadata": [
+        {"key": "STRIDE", "value": ["S"]},
+        {"key": "Priority", "value": "Medium"},
+        {"key": "Comments", "value": "JWKS URI resolved from a fixed HTTPS issuer via OIDC discovery; algorithms pinned to RS256 (no alg:none); issuer, audience, and expiry all required. Signing keys cached at module scope. Depends on IdP trust (assumption 2). Deployer must set OIDC_ISSUER / OIDC_AUDIENCE / REQUIRED_GROUP correctly, called out in the deploy docs."}
+      ],
+      "tags": ["edge-authorization", "oidc"]
+    },
+    {
+      "id": "4ea64054-a001-4259-a59a-c3dbc5e65b88",
+      "numericId": 6,
+      "threatSource": "an actor",
+      "prerequisites": "with a network path to the Athena query-results bucket",
+      "threatAction": "access staged query output",
+      "threatImpact": "disclosure of query results derived from security logs",
+      "impactedGoal": ["confidentiality"],
+      "impactedAssets": ["athena query results"],
+      "statement": "An actor with a network path to the Athena query-results bucket can access staged query output, which leads to disclosure of query results derived from security logs, resulting in reduced confidentiality of athena query results",
+      "metadata": [
+        {"key": "STRIDE", "value": ["I"]},
+        {"key": "Priority", "value": "Low"},
+        {"key": "Comments", "value": "Results bucket has Block Public Access ALL, enforceSSL, versioning, SSE-S3, and server access logging to a dedicated log bucket. SSE-S3 rather than a customer-managed KMS key is a documented sample simplification. The content is transient staging output, reproducible by re-running the query. Residual risk: low."}
+      ],
+      "tags": ["data-at-rest"]
+    },
+    {
+      "id": "a30c04b6-f72c-4440-a588-949ab9ee1230",
+      "numericId": 7,
+      "threatSource": "a deployer",
+      "prerequisites": "who selects an unentitled, unapproved, or untrusted model/vendor",
+      "threatAction": "point the Converse model parameter at a non-compliant foundation model",
+      "threatImpact": "a compliance or supply-chain exposure in the inference path",
+      "impactedGoal": ["integrity"],
+      "impactedAssets": ["model inference path"],
+      "statement": "A deployer who selects an unentitled, unapproved, or untrusted model/vendor can point the Converse model parameter at a non-compliant foundation model, which leads to a compliance or supply-chain exposure in the inference path, resulting in reduced integrity of the model inference path",
+      "metadata": [
+        {"key": "STRIDE", "value": ["T"]},
+        {"key": "Priority", "value": "Low"},
+        {"key": "Comments", "value": "The model is a deploy-time parameter invoked through the Amazon Bedrock Converse API, a first-party AWS managed foundation-model service, with no third-party GenAI endpoint and no bundled training dataset. Bedrock invoke is scoped to inference-profile and foundation-model ARNs. Model choice and entitlement are the deployer's responsibility (assumption 4); GovCloud uses the FIPS endpoint. Out of scope for the sample itself."}
+      ],
+      "tags": ["genai", "supply-chain"]
+    },
+    {
+      "id": "8e52af9d-7eea-4bfa-9859-a21e06f4a2fb",
+      "numericId": 8,
+      "threatSource": "an authenticated analyst",
+      "prerequisites": "issuing repeated or expensive questions",
+      "threatAction": "drive unbounded agent tool-use loops or large Athena scans",
+      "threatImpact": "excess Bedrock/Athena cost or degraded availability",
+      "impactedGoal": ["availability"],
+      "impactedAssets": ["query service", "account spend"],
+      "statement": "An authenticated analyst issuing repeated or expensive questions can drive unbounded agent tool-use loops or large Athena scans, which leads to excess Bedrock/Athena cost or degraded availability, resulting in reduced availability of the query service and account spend",
+      "metadata": [
+        {"key": "STRIDE", "value": ["D"]},
+        {"key": "Priority", "value": "Low"},
+        {"key": "Comments", "value": "The tool-use loop is bounded (MAX_TOOL_TURNS=6), the Athena poll is bounded (~50s), the Lambda timeout is 120s, and Converse is capped (maxTokens=1024, temperature=0). Access is gated to an authorized group, so the surface is authenticated analysts, not the internet. Non-partitioned demo tables mean full scans; docs flag partition projection as a production step. Residual risk: low."}
+      ],
+      "tags": ["availability", "cost"]
+    }
+  ],
+  "mitigations": [
+    {
+      "id": "060e6faa-58e2-42cd-9f99-86b1c2704804",
+      "numericId": 1,
+      "content": "Handler SQL guard: _run_athena rejects any statement that does not begin with SELECT/WITH, or that contains a forbidden token (insert, update, delete, drop, alter, create, grant, revoke, msck, unload).",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "1713d4e5-802d-42da-ae15-45aa7cbe9a4c",
+      "numericId": 2,
+      "content": "Read-only IAM execution role (securitylogagent-exec-role): no write actions anywhere; ARN-scoped to the one Athena workgroup, the cross-account Glue catalog/database/tables, the single central-log S3 bucket, the log CMK (Decrypt/DescribeKey), and the chosen Bedrock model/inference-profile ARNs.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "18b178df-0916-421f-8bd8-6c042224e2be",
+      "numericId": 3,
+      "content": "Locked-down Athena workgroup (securitylogagent-wg): enforceWorkGroupConfiguration=true forces output location and encryption and disables client-side override.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "c95cff1d-1f30-413f-a563-a9666d8a9523",
+      "numericId": 4,
+      "content": "OIDC TOKEN Lambda authorizer: validates JWT signature (RS256, no alg:none), issuer, audience, and expiry, and requires membership in a designated security group claim (groups / roles / cognito:groups) before the handler is reached.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "93c2d108-efa0-4b18-97dd-368f6ee0f577",
+      "numericId": 5,
+      "content": "Private API Gateway (PRIVATE endpoint) with an optional resource policy restricting execute-api:Invoke to a specific source VPC endpoint; no public surface on the commercial mainline.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "3e13eba4-51a3-4564-951e-b0cf96630256",
+      "numericId": 6,
+      "content": "Result controls: Athena MaxResults=100 and a system prompt that enforces a default LIMIT 100 and time filters, bounding the volume returned per query.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "88a7148b-c433-411f-b171-6f0a61da2742",
+      "numericId": 7,
+      "content": "Athena results bucket hardening: Block Public Access ALL, enforceSSL (TLS required), versioning, SSE-S3 encryption, and server access logging to a dedicated access-log bucket.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "19b2482e-95b5-4eb0-b124-ebf94ded5d08",
+      "numericId": 8,
+      "content": "First-party model path: Amazon Bedrock Converse API with a deploy-time model/inference-profile parameter (no third-party GenAI endpoint, no bundled dataset), bedrock:InvokeModel scoped to inference-profile and foundation-model ARNs; GovCloud uses the FIPS endpoint.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "a19cfd28-54c5-4aec-a6dc-7053a2517de1",
+      "numericId": 9,
+      "content": "Loop and cost bounds: MAX_TOOL_TURNS=6, bounded Athena polling (~50s), Lambda timeout 120s, Converse maxTokens=1024 and temperature=0.",
+      "status": "mitigationResolved"
+    },
+    {
+      "id": "3d2ea681-37ad-4dd5-b447-c592c98124a2",
+      "numericId": 10,
+      "content": "Cross-account data controls via native mechanisms (no Lake Formation): scoped S3 bucket policy, Glue catalog resource policy, and KMS key-policy grant, owned by the LZA config so they are applied through the LZA pipeline rather than out of band.",
+      "status": "mitigationResolved"
+    }
+  ],
+  "mitigationLinks": [
+    {"mitigationId": "060e6faa-58e2-42cd-9f99-86b1c2704804", "linkedId": "aa0bab79-9c66-4146-aa17-744c62ab8e36"},
+    {"mitigationId": "1713d4e5-802d-42da-ae15-45aa7cbe9a4c", "linkedId": "aa0bab79-9c66-4146-aa17-744c62ab8e36"},
+    {"mitigationId": "18b178df-0916-421f-8bd8-6c042224e2be", "linkedId": "aa0bab79-9c66-4146-aa17-744c62ab8e36"},
+    {"mitigationId": "c95cff1d-1f30-413f-a563-a9666d8a9523", "linkedId": "c673ebf5-ede9-4a99-81e0-c18f3891f7d9"},
+    {"mitigationId": "93c2d108-efa0-4b18-97dd-368f6ee0f577", "linkedId": "c673ebf5-ede9-4a99-81e0-c18f3891f7d9"},
+    {"mitigationId": "1713d4e5-802d-42da-ae15-45aa7cbe9a4c", "linkedId": "6879d93a-a3c1-4566-8e83-3c532c46ace6"},
+    {"mitigationId": "3d2ea681-37ad-4dd5-b447-c592c98124a2", "linkedId": "6879d93a-a3c1-4566-8e83-3c532c46ace6"},
+    {"mitigationId": "c95cff1d-1f30-413f-a563-a9666d8a9523", "linkedId": "cb6b0f48-10fe-4da5-b68d-10ce7330a722"},
+    {"mitigationId": "3e13eba4-51a3-4564-951e-b0cf96630256", "linkedId": "cb6b0f48-10fe-4da5-b68d-10ce7330a722"},
+    {"mitigationId": "c95cff1d-1f30-413f-a563-a9666d8a9523", "linkedId": "95b0fff0-9583-4ea2-9e0a-1ed103bfa612"},
+    {"mitigationId": "88a7148b-c433-411f-b171-6f0a61da2742", "linkedId": "4ea64054-a001-4259-a59a-c3dbc5e65b88"},
+    {"mitigationId": "18b178df-0916-421f-8bd8-6c042224e2be", "linkedId": "4ea64054-a001-4259-a59a-c3dbc5e65b88"},
+    {"mitigationId": "19b2482e-95b5-4eb0-b124-ebf94ded5d08", "linkedId": "a30c04b6-f72c-4440-a588-949ab9ee1230"},
+    {"mitigationId": "1713d4e5-802d-42da-ae15-45aa7cbe9a4c", "linkedId": "a30c04b6-f72c-4440-a588-949ab9ee1230"},
+    {"mitigationId": "a19cfd28-54c5-4aec-a6dc-7053a2517de1", "linkedId": "8e52af9d-7eea-4bfa-9859-a21e06f4a2fb"},
+    {"mitigationId": "c95cff1d-1f30-413f-a563-a9666d8a9523", "linkedId": "8e52af9d-7eea-4bfa-9859-a21e06f4a2fb"}
+  ],
+  "assumptionLinks": [
+    {"type": "Threat", "assumptionId": "35270dbc-6683-4a9a-bc46-2be60b8421fb", "linkedId": "c673ebf5-ede9-4a99-81e0-c18f3891f7d9"},
+    {"type": "Threat", "assumptionId": "35270dbc-6683-4a9a-bc46-2be60b8421fb", "linkedId": "95b0fff0-9583-4ea2-9e0a-1ed103bfa612"},
+    {"type": "Threat", "assumptionId": "fef04af4-b07b-46d6-ade5-2b893c2c7a5f", "linkedId": "6879d93a-a3c1-4566-8e83-3c532c46ace6"},
+    {"type": "Threat", "assumptionId": "6b68c734-a59b-472d-97cd-d9c2705c01d9", "linkedId": "a30c04b6-f72c-4440-a588-949ab9ee1230"},
+    {"type": "Threat", "assumptionId": "62a0c0cb-d575-41b9-a547-91471825547e", "linkedId": "cb6b0f48-10fe-4da5-b68d-10ce7330a722"}
+  ]
+}

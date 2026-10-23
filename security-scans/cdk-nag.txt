@@ -1,0 +1,20 @@
+Unknown option(s): --all. These will be ignored. Run 'cdk --help' to see available options.
+AI agent detected
+[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
+  Use `addResourceDependency` instead.
+  This API will be removed in the next major release.
+[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
+  Use `addResourceDependency` instead.
+  This API will be removed in the next major release.
+[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
+  Use `addResourceDependency` instead.
+  This API will be removed in the next major release.
+[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
+  Use `addResourceDependency` instead.
+  This API will be removed in the next major release.
+WARNING installLatestAwsSdk was not specified, and defaults to true. You probably do not want this. Set the global context flag '@aws-cdk/customresources:installLatestAwsSdkDefault' to false to switch this behavior off project-wide, or set the property explicitly to true if you know you need to call APIs that are not in Lambda's built-in SDK version. (Construct Annotations)
+   SecurityLogArchiveGrantStack/GlueCatalogResourcePolicy
+   Acknowledge with 'Construct-Annotations::@aws-cdk/custom-resources:installLatestAwsSdkNotSpecified'
+Successfully synthesized to /Users/massacco/Temper/deliverables/sample-security-log-query-agent/cdk.out
+Supply a stack id (SecurityLogQueryStack, SecurityLogArchiveGrantStack) to display its template.
+78 feature flags are not configured. Run 'cdk flags --unstable=flags' to learn more.
