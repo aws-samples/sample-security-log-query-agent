@@ -1,20 +1,37 @@
-Unknown option(s): --all. These will be ignored. Run 'cdk --help' to see available options.
-AI agent detected
-[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
-  Use `addResourceDependency` instead.
-  This API will be removed in the next major release.
-[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
-  Use `addResourceDependency` instead.
-  This API will be removed in the next major release.
-[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
-  Use `addResourceDependency` instead.
-  This API will be removed in the next major release.
-[WARNING] aws-cdk-lib.CfnResource#addDependency is deprecated.
-  Use `addResourceDependency` instead.
-  This API will be removed in the next major release.
-WARNING installLatestAwsSdk was not specified, and defaults to true. You probably do not want this. Set the global context flag '@aws-cdk/customresources:installLatestAwsSdkDefault' to false to switch this behavior off project-wide, or set the property explicitly to true if you know you need to call APIs that are not in Lambda's built-in SDK version. (Construct Annotations)
-   SecurityLogArchiveGrantStack/GlueCatalogResourcePolicy
-   Acknowledge with 'Construct-Annotations::@aws-cdk/custom-resources:installLatestAwsSdkNotSpecified'
-Successfully synthesized to /Users/massacco/Temper/deliverables/sample-security-log-query-agent/cdk.out
-Supply a stack id (SecurityLogQueryStack, SecurityLogArchiveGrantStack) to display its template.
-78 feature flags are not configured. Run 'cdk flags --unstable=flags' to learn more.
+cdk-nag v3 (AwsSolutions + NIST 800-53 R5) validation evidence
+Generated via: cdk synth SecurityLogQuery-App SecurityLogQuery-LogArchiveGrants (cdk-nag 3.0.2, aws-cdk-lib 2.270.0)
+example context: queryAccount=111111111111 logArchiveAccount=222222222222 region=us-east-1
+
+=== cdk.out/validation-report.json (empty pluginReports => zero unsuppressed violations) ===
+{
+  "version": "54.0.0",
+  "title": "Validation Report",
+  "pluginReports": []
+}
+=== Rules acknowledged on SecurityLogQuery-App (baked into template metadata as the v3 audit trail) ===
+   1 AwsSolutions-APIG1
+   1 AwsSolutions-APIG2
+   1 AwsSolutions-APIG3
+   1 AwsSolutions-APIG6
+   1 AwsSolutions-COG4
+   2 AwsSolutions-IAM4
+  11 AwsSolutions-IAM5
+   1 AwsSolutions-L1
+   1 NIST.800.53.R5-APIGWAssociatedWithWAF
+   1 NIST.800.53.R5-APIGWCacheEnabledAndEncrypted
+   1 NIST.800.53.R5-APIGWExecutionLoggingEnabled
+   1 NIST.800.53.R5-APIGWSSLEnabled
+   1 NIST.800.53.R5-IAMNoInlinePolicy
+   1 NIST.800.53.R5-LambdaConcurrency
+   1 NIST.800.53.R5-LambdaDLQ
+   1 NIST.800.53.R5-LambdaInsideVPC
+   1 NIST.800.53.R5-S3BucketReplicationEnabled
+   1 NIST.800.53.R5-S3DefaultEncryptionKMS
+
+=== Rules acknowledged on SecurityLogQuery-LogArchiveGrants ===
+   1 AwsSolutions-IAM4
+   1 AwsSolutions-IAM5
+   1 NIST.800.53.R5-IAMNoInlinePolicy
+   1 NIST.800.53.R5-LambdaConcurrency
+   1 NIST.800.53.R5-LambdaDLQ
+   1 NIST.800.53.R5-LambdaInsideVPC

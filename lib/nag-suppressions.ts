@@ -207,6 +207,8 @@ export function applyNagSuppressions(queryStack: Stack, grantStack: Stack): void
     },
   ];
 
+  // applyToChildren is implicit for stack-level acknowledgments in cdk-nag v3:
+  // Validations.of(stack).acknowledge covers the stack and its descendants.
   for (const ack of queryAcks) {
     Validations.of(queryStack).acknowledge(ack);
   }

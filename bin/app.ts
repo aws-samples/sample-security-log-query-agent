@@ -1,7 +1,7 @@
+#!/usr/bin/env node
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-#!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { Validations } from 'aws-cdk-lib';
@@ -120,8 +120,9 @@ const grantStack = new LogArchiveGrantStack(app, 'SecurityLogQuery-LogArchiveGra
   tags: { app: 'security-log-query-agent', component: 'logarchive-grants' },
 });
 
-// Compliance checks (cdk-nag). Findings are surfaced at synth time as evidence
-// for security review. Suppressions carry per-rule technical justifications.
+// Compliance checks (cdk-nag v3). The packs are policy-validation plugins, so they
+// register via Validations.of(app).addPlugins(...) (NOT Aspects, which is v2).
+// Suppressions are acknowledged first so they are in place when validation runs.
 applyNagSuppressions(queryStack, grantStack);
 Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));
 Validations.of(app).addPlugins(new NIST80053R5Checks(app, { verbose: true }));
