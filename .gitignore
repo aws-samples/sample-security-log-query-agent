@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# CDK
+cdk.out/
+cdk.context.json
+
+# Compiled TypeScript
+*.js
+*.d.ts
+!jest.config.js
+
+# Environment / local config
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

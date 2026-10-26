@@ -1,0 +1,27 @@
+{
+  "name": "sample-security-log-query-agent",
+  "version": "1.0.0",
+  "description": "Natural-language security-log query agent over a centralized log archive using Amazon Bedrock and Amazon Athena (AWS sample / Prescriptive Guidance reference implementation).",
+  "license": "MIT-0",
+  "bin": {
+    "sample-security-log-query-agent": "bin/app.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy --all"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.9",
+    "aws-cdk": "^2.1143.0",
+    "cdk-nag": "^3.0.2",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.270.0",
+    "constructs": "^10.5.1",
+    "source-map-support": "0.5.21"
+  }
+}

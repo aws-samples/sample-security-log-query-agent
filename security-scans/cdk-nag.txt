@@ -1,0 +1,37 @@
+cdk-nag v3 (AwsSolutions + NIST 800-53 R5) validation evidence
+Generated via: cdk synth SecurityLogQuery-App SecurityLogQuery-LogArchiveGrants (cdk-nag 3.0.2, aws-cdk-lib 2.270.0)
+example context: queryAccount=111111111111 logArchiveAccount=222222222222 region=us-east-1
+
+=== cdk.out/validation-report.json (empty pluginReports => zero unsuppressed violations) ===
+{
+  "version": "54.0.0",
+  "title": "Validation Report",
+  "pluginReports": []
+}
+=== Rules acknowledged on SecurityLogQuery-App (baked into template metadata as the v3 audit trail) ===
+   1 AwsSolutions-APIG1
+   1 AwsSolutions-APIG2
+   1 AwsSolutions-APIG3
+   1 AwsSolutions-APIG6
+   1 AwsSolutions-COG4
+   2 AwsSolutions-IAM4
+  11 AwsSolutions-IAM5
+   1 AwsSolutions-L1
+   1 NIST.800.53.R5-APIGWAssociatedWithWAF
+   1 NIST.800.53.R5-APIGWCacheEnabledAndEncrypted
+   1 NIST.800.53.R5-APIGWExecutionLoggingEnabled
+   1 NIST.800.53.R5-APIGWSSLEnabled
+   1 NIST.800.53.R5-IAMNoInlinePolicy
+   1 NIST.800.53.R5-LambdaConcurrency
+   1 NIST.800.53.R5-LambdaDLQ
+   1 NIST.800.53.R5-LambdaInsideVPC
+   1 NIST.800.53.R5-S3BucketReplicationEnabled
+   1 NIST.800.53.R5-S3DefaultEncryptionKMS
+
+=== Rules acknowledged on SecurityLogQuery-LogArchiveGrants ===
+   1 AwsSolutions-IAM4
+   1 AwsSolutions-IAM5
+   1 NIST.800.53.R5-IAMNoInlinePolicy
+   1 NIST.800.53.R5-LambdaConcurrency
+   1 NIST.800.53.R5-LambdaDLQ
+   1 NIST.800.53.R5-LambdaInsideVPC
