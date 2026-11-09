@@ -9,7 +9,18 @@ import { Stack, Validations } from 'aws-cdk-lib';
  * reference implementation; a production deployment reviews and tightens them against
  * its own security requirements (as the README states).
  */
-export function applyNagSuppressions(queryStack: Stack, grantStack: Stack): void {
+/** Deployment values that appear in the resource ARNs cdk-nag reports. */
+export interface NagContext {
+  readonly queryAccount: string;
+  readonly logArchiveAccount: string;
+  readonly region: string;
+  readonly glueDatabase: string;
+  readonly centralBucketName: string;
+  /** When set, the KMS grant names one key and has no wildcard to acknowledge. */
+  readonly centralLogKmsKeyArn?: string;
+}
+
+export function applyNagSuppressions(queryStack: Stack, grantStack: Stack, ctx: NagContext): void {
   const iam4Reason =
     'AWSLambdaBasicExecutionRole (and the API Gateway CloudWatch push policy) provide ' +
     'only CloudWatch Logs write for the function/stage log group. They grant no ' +
@@ -46,19 +57,26 @@ export function applyNagSuppressions(queryStack: Stack, grantStack: Stack): void
       reason: iam5Reason,
     },
     {
-      id: 'AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:bedrock:us-east-1:111111111111:inference-profile/*]',
+      id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:bedrock:${ctx.region}:${ctx.queryAccount}:inference-profile/*]`,
       reason: iam5Reason,
     },
     {
-      id: 'AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:us-east-1:222222222222:table/security_central_logs/*]',
+      id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:${ctx.region}:${ctx.logArchiveAccount}:table/${ctx.glueDatabase}/*]`,
       reason: iam5Reason,
     },
+    ...(ctx.centralLogKmsKeyArn
+      ? []
+      : [
+          {
+            id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:kms:${ctx.region}:${ctx.logArchiveAccount}:key/*]`,
+            reason:
+              'No central-log key ARN was supplied (centralLogKmsKeyArn), so kms:Decrypt is granted ' +
+              'on keys in the Log Archive account, restricted by kms:ViaService to calls made ' +
+              'through Amazon S3. Supplying the key ARN removes this wildcard.',
+          },
+        ]),
     {
-      id: 'AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:kms:us-east-1:222222222222:key/*]',
-      reason: iam5Reason,
-    },
-    {
-      id: 'AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::aws-accelerator-central-logs-222222222222-us-east-1/*]',
+      id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::${ctx.centralBucketName}/*]`,
       reason: iam5Reason,
     },
     {
@@ -156,6 +174,13 @@ export function applyNagSuppressions(queryStack: Stack, grantStack: Stack): void
         'The Athena results bucket uses SSE-S3 to keep the reference free of a customer ' +
         'managed KMS key (which the README notes as a production hardening step). Query ' +
         'results are transient staging output, not the source log data.',
+    },
+    {
+      id: 'NIST.800.53.R5-CloudWatchLogGroupEncrypted',
+      reason:
+        'CloudWatch Logs encrypts log data at rest with service-managed keys. The reference ' +
+        'does not create a customer managed KMS key, consistent with the SSE-S3 results ' +
+        'bucket; a production deployment that requires one sets kmsKey on both log groups.',
     },
     {
       id: 'NIST.800.53.R5-S3BucketReplicationEnabled',

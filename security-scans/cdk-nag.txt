@@ -1,10 +1,10 @@
 cdk-nag v3 (AwsSolutions + NIST 800-53 R5) validation evidence
-Generated via: cdk synth SecurityLogQuery-App SecurityLogQuery-LogArchiveGrants (cdk-nag 3.0.2, aws-cdk-lib 2.270.0)
-example context: queryAccount=111111111111 logArchiveAccount=222222222222 region=us-east-1
+Generated via: cdk synth SecurityLogQuery-App SecurityLogQuery-LogArchiveGrants (cdk-nag 3.0.2, aws-cdk-lib 2.275.0)
+example context: queryAccount=111111111111 logArchiveAccount=222222222222 region=us-east-1 apiResourcePolicySourceVpce=vpce-0123456789abcdef0
 
 === cdk.out/validation-report.json (empty pluginReports => zero unsuppressed violations) ===
 {
-  "version": "54.0.0",
+  "version": "55.0.0",
   "title": "Validation Report",
   "pluginReports": []
 }
@@ -21,6 +21,7 @@ example context: queryAccount=111111111111 logArchiveAccount=222222222222 region
    1 NIST.800.53.R5-APIGWCacheEnabledAndEncrypted
    1 NIST.800.53.R5-APIGWExecutionLoggingEnabled
    1 NIST.800.53.R5-APIGWSSLEnabled
+   1 NIST.800.53.R5-CloudWatchLogGroupEncrypted
    1 NIST.800.53.R5-IAMNoInlinePolicy
    1 NIST.800.53.R5-LambdaConcurrency
    1 NIST.800.53.R5-LambdaDLQ

@@ -6,8 +6,8 @@ a foundation model turns it into a **safe, read-only Athena SQL query**, runs it
 against the org's centralized security logs, and returns a plain-English summary
 of the rows plus the exact SQL it ran.
 
-The reference implementation targets an AWS Landing Zone Accelerator (LZA) /
-AWS Control Tower landing zone with centralized log delivery to a dedicated
+The reference implementation targets an AWS Landing Zone Accelerator (LZA)
+landing zone with centralized log delivery to a dedicated
 Log Archive account, and uses the **Amazon Bedrock Converse API with tool use**
 so it is **model-agnostic**: the model is a single deploy-time parameter (either
 a bare model ID or an inference-profile ID) and the same code drives multiple
@@ -46,7 +46,9 @@ Analyst question:  "Which source IPs had the most REJECTED VPC flows yesterday?"
 | `network_firewall` | AWS Network Firewall flow/alert logs | blocked flows, alert signatures, traffic by domain |
 
 All four are delivered natively to the LZA central log bucket, so no extra log
-plumbing is required beyond standard LZA / Control Tower centralized logging.
+plumbing is required beyond standard LZA centralized logging. Other landing
+zones need the bucket name (`centralBucketName`) and table locations adjusted;
+an AWS Control Tower log bucket holds CloudTrail and AWS Config logs only.
 
 ---
 
@@ -77,8 +79,10 @@ Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Three enforcement layers
 
-1. **Edge** — the request path validates an OIDC JWT and requires membership in a
-   designated security group claim before the query Lambda is ever reached.
+1. **Edge** — the API is private and accepts requests only through one
+   `execute-api` VPC endpoint; the request path validates an OIDC JWT and
+   requires membership in a designated security group claim before the query
+   Lambda is ever reached.
 2. **IAM** — the agent runs as `securitylogagent-exec-role`, disjoint from any
    other role, with **no write permissions anywhere**.
 3. **Data** — read-only is enforced three ways: the handler rejects any
@@ -99,7 +103,7 @@ against any Converse-compatible, tool-use-capable model:
 - **Amazon Nova** (e.g. `amazon.nova-pro-v1:0`) works by bare model ID.
 - **Anthropic Claude** current models are **not** invocable by bare model ID
   on-demand — they require a cross-Region **inference profile** ID (e.g.
-  `us.anthropic.claude-sonnet-4-5-20250929-v1:0`). Converse's `modelId` accepts a
+  `us.anthropic.claude-sonnet-5`). Converse's `modelId` accepts a
   bare model ID **or** an inference-profile ID/ARN transparently. See
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the exact finding and fix.
@@ -125,40 +129,48 @@ against any Converse-compatible, tool-use-capable model:
 ## Quickstart
 
 ```bash
-npm install
+npm ci
 npm run build
 
+# Both stacks are synthesized on every command, so pass the full context each time.
+CTX=(
+  -c queryAccount=<QUERY_ACCOUNT> -c logArchiveAccount=<LOG_ARCHIVE_ACCOUNT>
+  -c region=us-east-1 -c orgId=<ORG_ID>
+  -c oidcIssuer=<OIDC_ISSUER_URL> -c oidcAudience=<OIDC_AUDIENCE>
+  -c requiredGroup=<GROUP_VALUE>
+  -c apiResourcePolicySourceVpce=<EXECUTE_API_VPCE_ID>
+  -c centralLogKmsKeyArn=<CENTRAL_LOG_KMS_KEY_ARN>
+  -c modelId=us.anthropic.claude-sonnet-5
+)
+
 # 1) Grants in the Log Archive account (Glue DB/tables + catalog resource policy)
-npx cdk deploy SecurityLogQuery-LogArchiveGrants \
-  -c logArchiveAccount=<LOG_ARCHIVE_ACCOUNT> \
-  -c queryAccount=<QUERY_ACCOUNT> \
-  -c orgId=<ORG_ID> \
-  -c region=us-east-1
+npx cdk deploy SecurityLogQuery-LogArchiveGrants "${CTX[@]}"
 
 # 2) Add the two emitted statements (AddToCentralLogBucketPolicy,
 #    AddToCentralLogKmsKeyPolicy) to the LZA-managed central-log bucket + KMS
 #    key policies IN THE LZA CONFIG, then run the LZA pipeline so the grants
 #    apply (see docs/DEPLOYMENT.md -- attaching them out of band gets reverted).
 
-# 3) The app itself in the query account
-npx cdk deploy SecurityLogQuery-App \
-  -c queryAccount=<QUERY_ACCOUNT> \
-  -c logArchiveAccount=<LOG_ARCHIVE_ACCOUNT> \
-  -c region=us-east-1 \
-  -c modelId=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+# 3) The app itself in the query account (packages the Lambda dependencies
+#    during synth)
+npx cdk deploy SecurityLogQuery-App "${CTX[@]}"
 ```
 
-Full runbook, prerequisites, and the smoke test are in
+Full runbook, prerequisites (including the `execute-api` VPC endpoint), the
+smoke tests, and production hardening steps are in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ---
 
 ## Prerequisites (summary)
 
-- Node 20+, AWS CDK v2, Python 3.12 (Lambda runtime).
-- An LZA / Control Tower landing zone delivering CloudTrail, VPC Flow Logs,
+- Node 20+, AWS CDK v2, Python 3.12 with `pip` (or Docker) for packaging the
+  Lambda dependencies.
+- An LZA landing zone delivering CloudTrail, VPC Flow Logs,
   GuardDuty, and Network Firewall logs to a central S3 bucket in a Log Archive
   account.
+- A VPC with an `execute-api` interface VPC endpoint; API callers run inside it.
+- An OIDC identity provider that issues a group claim for analysts.
 - Bedrock model access for your chosen model (note the inference-profile
   requirement for current Claude models — `aws bedrock list-inference-profiles`).
 - Access to both the query account (app) and the Log Archive account (grants).
@@ -174,6 +186,9 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full list.
 ├── bin/                    # CDK app entry; wires the two stacks + context params
 ├── lib/                    # CDK stacks (app stack + Log Archive grant stack)
 ├── lambda/                 # Lambda source (agent loop, authorizer)
+├── test/                   # Infrastructure tests (npm test)
+├── tests/                  # Lambda unit tests (pytest)
+├── security-scans/         # cdk-nag, npm audit, and Bandit results
 ├── docs/
 │   ├── ARCHITECTURE.md     # Deep dive: flows, Converse loop, IAM, data controls, IL5 variant
 │   └── DEPLOYMENT.md       # Step-by-step deploy runbook + prerequisites + smoke test

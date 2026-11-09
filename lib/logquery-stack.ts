@@ -8,7 +8,15 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigw from 'aws-cdk-lib/aws-apigateway';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as athena from 'aws-cdk-lib/aws-athena';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'path';
+import { PYTHON_ARCHITECTURE, PYTHON_RUNTIME, pythonCode } from './python-bundling';
+
+/**
+ * API Gateway REST integration timeout (seconds). The handler finishes inside it;
+ * see RESPONSE_DEADLINE_SECONDS in the api-handler.
+ */
+const API_INTEGRATION_TIMEOUT_SECONDS = 29;
 
 export interface LogQueryStackProps extends cdk.StackProps {
   /** Account that hosts the query API and the read-only agent role (this stack's account). */
@@ -17,9 +25,7 @@ export interface LogQueryStackProps extends cdk.StackProps {
   readonly logArchiveAccount: string;
   /** Region for all resources and ARNs. */
   readonly region: string;
-  /** AWS Organizations id (o-xxxx); scopes the private API resource policy to the org. */
-  readonly orgId: string;
-  /** Bedrock model id (usually a cross-region inference profile id, e.g. us.anthropic.claude-sonnet-4-5-...). */
+  /** Bedrock model id (usually a cross-region inference profile id, e.g. us.anthropic.claude-sonnet-5). */
   readonly modelId: string;
   /** Glue database in the Log Archive catalog holding the central-log tables. */
   readonly glueDatabase: string;
@@ -35,8 +41,26 @@ export interface LogQueryStackProps extends cdk.StackProps {
   readonly oidcAudience: string;
   /** Group claim the caller must carry to be authorized. */
   readonly requiredGroup: string;
-  /** Optional VPC endpoint id: when set, the private API resource policy is restricted to it. */
-  readonly apiResourcePolicySourceVpce?: string;
+  /**
+   * ID of the existing execute-api interface VPC endpoint that callers use (vpce-...).
+   * The private API's resource policy denies every request that does not arrive through it.
+   */
+  readonly apiResourcePolicySourceVpce: string;
+  /** Name of the central log bucket in the Log Archive account. */
+  readonly centralBucketName: string;
+  /**
+   * ARN of the KMS key that encrypts the central log bucket. When set, kms:Decrypt is
+   * scoped to that key; otherwise it is granted on any key in the Log Archive account,
+   * limited to use through Amazon S3.
+   */
+  readonly centralLogKmsKeyArn?: string;
+  /** Per-query Athena scan limit in bytes (workgroup BytesScannedCutoffPerQuery). */
+  readonly bytesScannedCutoffPerQuery: number;
+  /**
+   * Optional sampling temperature for the model. Omitted from the request when unset,
+   * because some current models reject the temperature parameter.
+   */
+  readonly modelTemperature?: number;
 }
 
 /**
@@ -58,8 +82,10 @@ export interface LogQueryStackProps extends cdk.StackProps {
  * Lake Formation is intentionally not used (unavailable in the GovCloud/IL5 variant, so
  * the pattern stays partition-portable).
  *
- * This mainline is deliberately the SIMPLE ingress: a private API Gateway reached over a
- * VPC endpoint, with no public surface. The GovCloud/IL5 hardening variant (documented
+ * This mainline is deliberately the SIMPLE ingress: a private API Gateway with no public
+ * surface. The stack does not create the execute-api interface VPC endpoint; the deployer
+ * supplies an existing one (landing zones usually provision endpoints centrally), and the
+ * API resource policy accepts requests only through it. The GovCloud/IL5 hardening variant (documented
  * separately, not built here) fronts this same API with a DoD CNAP path -- internet/DISN
  * ingress -> internal ALB + WAF -> execute-api VPC endpoint -> this private API -- and runs
  * the same Bedrock Converse call against the FIPS endpoint with an entitled model or a
@@ -78,16 +104,34 @@ export class LogQueryStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       versioned: true,
+      lifecycleRules: [
+        {
+          id: 'ExpireAccessLogs',
+          expiration: cdk.Duration.days(90),
+          noncurrentVersionExpiration: cdk.Duration.days(1),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
 
     // ---- Athena query-results bucket (SSE-S3, no public access, TLS enforced) ----
+    // Results are copies of log data, so they expire after seven days, and versioning
+    // keeps no older copies beyond one day.
     const resultsBucket = new s3.Bucket(this, 'AthenaResults', {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       versioned: true,
+      lifecycleRules: [
+        {
+          id: 'ExpireQueryResults',
+          expiration: cdk.Duration.days(7),
+          noncurrentVersionExpiration: cdk.Duration.days(1),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+      ],
       serverAccessLogsBucket: accessLogsBucket,
       serverAccessLogsPrefix: 'athena-results-access/',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -100,9 +144,13 @@ export class LogQueryStack extends cdk.Stack {
     const workgroup = new athena.CfnWorkGroup(this, 'LogAgentWorkgroup', {
       name: props.workgroupName,
       state: 'ENABLED',
+      // Without this, stack deletion fails once any query has run ("WorkGroup ... is not empty").
+      recursiveDeleteOption: true,
       workGroupConfiguration: {
         enforceWorkGroupConfiguration: true,
         publishCloudWatchMetricsEnabled: true,
+        // Hard per-query scan ceiling: Athena cancels any query that would read more.
+        bytesScannedCutoffPerQuery: props.bytesScannedCutoffPerQuery,
         resultConfiguration: {
           outputLocation: `s3://${resultsBucket.bucketName}/results/`,
           encryptionConfiguration: { encryptionOption: 'SSE_S3' },
@@ -137,6 +185,7 @@ export class LogQueryStack extends cdk.Stack {
       sid: 'AthenaQuery',
       actions: [
         'athena:StartQueryExecution',
+        'athena:StopQueryExecution',
         'athena:GetQueryExecution',
         'athena:GetQueryResults',
         'athena:GetWorkGroup',
@@ -168,17 +217,21 @@ export class LogQueryStack extends cdk.Stack {
       sid: 'CrossAccountLogRead',
       actions: ['s3:GetObject', 's3:ListBucket'],
       resources: [
-        `arn:${this.partition}:s3:::aws-accelerator-central-logs-${logArchive}-${this.region}`,
-        `arn:${this.partition}:s3:::aws-accelerator-central-logs-${logArchive}-${this.region}/*`,
+        `arn:${this.partition}:s3:::${props.centralBucketName}`,
+        `arn:${this.partition}:s3:::${props.centralBucketName}/*`,
       ],
     }));
 
-    // Central log objects are SSE-KMS with the LZA central-log CMK (in Log Archive).
-    // Decrypt only; the key policy in the Log Archive account grants this role.
+    // Central log objects are SSE-KMS with the landing-zone central-log key (in Log Archive).
+    // Decrypt only, and only when Amazon S3 makes the call on the role's behalf; the key
+    // policy in the Log Archive account must also grant this role.
     logRole.addToPolicy(new iam.PolicyStatement({
       sid: 'CrossAccountLogKmsDecrypt',
       actions: ['kms:Decrypt', 'kms:DescribeKey'],
-      resources: [`arn:${this.partition}:kms:${this.region}:${logArchive}:key/*`],
+      resources: [
+        props.centralLogKmsKeyArn ?? `arn:${this.partition}:kms:${this.region}:${logArchive}:key/*`,
+      ],
+      conditions: { StringEquals: { 'kms:ViaService': `s3.${this.region}.amazonaws.com` } },
     }));
 
     // Results bucket read/write for query output staging.
@@ -197,12 +250,29 @@ export class LogQueryStack extends cdk.Stack {
     }));
 
     // ---- api-handler Lambda: the DIY agent loop (Bedrock Converse tool-use -> Athena) ----
+    // Log groups are explicit so retention is set. The api-handler group is the audit
+    // trail (caller, question, SQL, query IDs), so it is retained on stack deletion.
+    const apiHandlerLogs = new logs.LogGroup(this, 'ApiHandlerLogs', {
+      retention: logs.RetentionDays.ONE_YEAR,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const authorizerLogs = new logs.LogGroup(this, 'AuthorizerLogs', {
+      retention: logs.RetentionDays.ONE_YEAR,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // ---- api-handler Lambda: the DIY agent loop (Bedrock Converse tool-use -> Athena) ----
+    // The function timeout matches the API Gateway integration timeout. The handler stops
+    // polling Athena and starting new model turns after RESPONSE_DEADLINE_SECONDS, which
+    // leaves time for the final model call that summarizes the rows.
     const apiHandler = new lambda.Function(this, 'ApiHandler', {
-      runtime: lambda.Runtime.PYTHON_3_12,
+      runtime: PYTHON_RUNTIME,
+      architecture: PYTHON_ARCHITECTURE,
       handler: 'api_handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'api-handler')),
+      code: pythonCode(path.join(__dirname, '..', 'lambda', 'api-handler')),
       role: logRole,
-      timeout: cdk.Duration.seconds(120),
+      logGroup: apiHandlerLogs,
+      timeout: cdk.Duration.seconds(API_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 512,
       environment: {
         MODEL_ID: props.modelId,
@@ -210,14 +280,18 @@ export class LogQueryStack extends cdk.Stack {
         GLUE_CATALOG_NAME: props.glueCatalogName,
         GLUE_DATABASE: props.glueDatabase,
         MAX_TOOL_TURNS: '6',
+        RESPONSE_DEADLINE_SECONDS: '22',
+        ...(props.modelTemperature === undefined ? {} : { MODEL_TEMPERATURE: String(props.modelTemperature) }),
       },
     });
 
     // ---- authorizer Lambda: OIDC issuer/audience + required group claim ----
     const authorizerFn = new lambda.Function(this, 'LogAgentAuthorizer', {
-      runtime: lambda.Runtime.PYTHON_3_12,
+      runtime: PYTHON_RUNTIME,
+      architecture: PYTHON_ARCHITECTURE,
       handler: 'authorizer.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'authorizer')),
+      code: pythonCode(path.join(__dirname, '..', 'lambda', 'authorizer')),
+      logGroup: authorizerLogs,
       timeout: cdk.Duration.seconds(10),
       environment: {
         OIDC_ISSUER: props.oidcIssuer,
@@ -227,43 +301,30 @@ export class LogQueryStack extends cdk.Stack {
     });
 
     // ---- Private regional REST API Gateway ----
-    // Private REST APIs REQUIRE a resource policy. The Allow statement is always scoped to
-    // the organization (aws:PrincipalOrgID), so callers outside the org are denied even on
-    // the default path. When a source VPC endpoint id is also provided, invocation is
-    // further restricted to that endpoint via an explicit Deny.
-    const orgCondition = { StringEquals: { 'aws:PrincipalOrgID': props.orgId } };
-    const resourcePolicy = props.apiResourcePolicySourceVpce
-      ? new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.DENY,
-              principals: [new iam.AnyPrincipal()],
-              actions: ['execute-api:Invoke'],
-              resources: ['execute-api:/*'],
-              conditions: {
-                StringNotEquals: { 'aws:SourceVpce': props.apiResourcePolicySourceVpce },
-              },
-            }),
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              principals: [new iam.AnyPrincipal()],
-              actions: ['execute-api:Invoke'],
-              resources: ['execute-api:/*'],
-              conditions: orgCondition,
-            }),
-          ],
-        })
-      : new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              principals: [new iam.AnyPrincipal()],
-              actions: ['execute-api:Invoke'],
-              resources: ['execute-api:/*'],
-              conditions: orgCondition,
-            }),
-          ],
-        });
+    // Private REST APIs REQUIRE a resource policy. Callers present an OIDC bearer token
+    // rather than SigV4 credentials, so principal-based keys such as aws:PrincipalOrgID are
+    // absent from the request and cannot gate access. The network boundary is the VPC
+    // endpoint instead: the explicit Deny is evaluated before the Lambda authorizer runs,
+    // so a request from any other endpoint is refused without reaching it.
+    const fromApiEndpoint = { 'aws:SourceVpce': props.apiResourcePolicySourceVpce };
+    const resourcePolicy = new iam.PolicyDocument({
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.DENY,
+          principals: [new iam.AnyPrincipal()],
+          actions: ['execute-api:Invoke'],
+          resources: ['execute-api:/*'],
+          conditions: { StringNotEquals: fromApiEndpoint },
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.AnyPrincipal()],
+          actions: ['execute-api:Invoke'],
+          resources: ['execute-api:/*'],
+          conditions: { StringEquals: fromApiEndpoint },
+        }),
+      ],
+    });
 
     const api = new apigw.RestApi(this, 'LogAgentApi', {
       restApiName: `${id}-api`,
@@ -289,6 +350,9 @@ export class LogQueryStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WorkgroupName', { value: workgroup.name });
     new cdk.CfnOutput(this, 'LogAgentRoleArn', { value: logRole.roleArn });
     new cdk.CfnOutput(this, 'ApiId', { value: api.restApiId });
+    new cdk.CfnOutput(this, 'ApiHandlerFunctionName', { value: apiHandler.functionName });
+    new cdk.CfnOutput(this, 'ApiHandlerLogGroupName', { value: apiHandlerLogs.logGroupName });
+    new cdk.CfnOutput(this, 'AthenaResultsBucketName', { value: resultsBucket.bucketName });
 
     // Keep the data catalog dependency explicit so the workgroup/role resolve names it registers.
     dataCatalog.node.addDependency(workgroup);
