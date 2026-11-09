@@ -8,7 +8,7 @@
     {
       "id": "339a8e0b-93a3-42a3-8a9e-6524c11a5722",
       "numericId": 1,
-      "content": "The LZA / Control Tower landing zone already delivers CloudTrail, VPC Flow Logs, GuardDuty, and Network Firewall logs to the central S3 bucket in a dedicated Log Archive account. This sample does not create or own that log data."
+      "content": "The LZA landing zone already delivers CloudTrail, VPC Flow Logs, GuardDuty, and Network Firewall logs to the central S3 bucket in a dedicated Log Archive account. This sample does not create or own that log data."
     },
     {
       "id": "35270dbc-6683-4a9a-bc46-2be60b8421fb",
@@ -45,7 +45,7 @@
       "metadata": [
         {"key": "STRIDE", "value": ["T"]},
         {"key": "Priority", "value": "Medium"},
-        {"key": "Comments", "value": "Defended at three independent layers: the handler rejects any SQL not starting with SELECT/WITH or containing a forbidden token; the read-only IAM role has no write actions anywhere; the Athena workgroup enforces its configuration. The IAM role alone makes mutation impossible. Residual risk: low."}
+        {"key": "Comments", "value": "Defended at three independent layers: the handler parses the SQL with sqlglot and accepts only a single SELECT (or WITH) statement; the read-only IAM role has no write actions anywhere; the Athena workgroup enforces its configuration. The IAM role alone makes mutation impossible. Residual risk: low."}
       ],
       "tags": ["read-only-guarantee", "prompt-injection"]
     },
@@ -62,7 +62,7 @@
       "metadata": [
         {"key": "STRIDE", "value": ["S", "E"]},
         {"key": "Priority", "value": "Medium"},
-        {"key": "Comments", "value": "TOKEN Lambda authorizer validates JWT signature (RS256), issuer, audience, and expiry, and requires the designated group claim before the handler is reached. API Gateway is a PRIVATE endpoint with an optional resource-policy pin to a specific VPC endpoint. Residual: 5-minute authorizer result cache means a revoked token stays valid up to the TTL; acceptable for a read-only path and documented."}
+        {"key": "Comments", "value": "TOKEN Lambda authorizer validates JWT signature (RS256), issuer, audience, and expiry, and requires the designated group claim before the handler is reached. API Gateway is a PRIVATE endpoint whose resource policy denies any request that does not arrive through the required execute-api VPC endpoint, evaluated before the authorizer runs. Residual: 5-minute authorizer result cache means a revoked token stays valid up to the TTL; acceptable for a read-only path and documented."}
       ],
       "tags": ["edge-authorization"]
     },
@@ -130,7 +130,7 @@
       "metadata": [
         {"key": "STRIDE", "value": ["I"]},
         {"key": "Priority", "value": "Low"},
-        {"key": "Comments", "value": "Results bucket has Block Public Access ALL, enforceSSL, versioning, SSE-S3, and server access logging to a dedicated log bucket. SSE-S3 rather than a customer-managed KMS key is a documented sample simplification. The content is transient staging output, reproducible by re-running the query. Residual risk: low."}
+        {"key": "Comments", "value": "Results bucket has Block Public Access ALL, enforceSSL, versioning, SSE-S3, and server access logging to a dedicated log bucket. SSE-S3 rather than a customer-managed KMS key is a documented sample simplification. Results expire after 7 days and noncurrent versions after 1 day; they are reproducible by re-running the query. Residual risk: low."}
       ],
       "tags": ["data-at-rest"]
     },
@@ -164,7 +164,7 @@
       "metadata": [
         {"key": "STRIDE", "value": ["D"]},
         {"key": "Priority", "value": "Low"},
-        {"key": "Comments", "value": "The tool-use loop is bounded (MAX_TOOL_TURNS=6), the Athena poll is bounded (~50s), the Lambda timeout is 120s, and Converse is capped (maxTokens=1024, temperature=0). Access is gated to an authorized group, so the surface is authenticated analysts, not the internet. Non-partitioned demo tables mean full scans; docs flag partition projection as a production step. Residual risk: low."}
+        {"key": "Comments", "value": "The tool-use loop is bounded (MAX_TOOL_TURNS=6), the handler works to a 22-second response deadline after which it starts no new model turn and cancels any running Athena query, the Lambda timeout matches the 29-second API Gateway limit, the Athena workgroup enforces a per-query bytes-scanned cutoff, and Converse is capped (maxTokens=1024). Access is gated to an authorized group, so the surface is authenticated analysts, not the internet. Non-partitioned demo tables mean full scans; docs flag partition projection as a production step. Residual risk: low."}
       ],
       "tags": ["availability", "cost"]
     }
@@ -197,7 +197,7 @@
     {
       "id": "93c2d108-efa0-4b18-97dd-368f6ee0f577",
       "numericId": 5,
-      "content": "Private API Gateway (PRIVATE endpoint) with an optional resource policy restricting execute-api:Invoke to a specific source VPC endpoint; no public surface on the commercial mainline.",
+      "content": "Private API Gateway (PRIVATE endpoint) whose resource policy denies execute-api:Invoke from any source other than the required execute-api VPC endpoint; no public surface on the commercial mainline.",
       "status": "mitigationResolved"
     },
     {
@@ -221,7 +221,7 @@
     {
       "id": "a19cfd28-54c5-4aec-a6dc-7053a2517de1",
       "numericId": 9,
-      "content": "Loop and cost bounds: MAX_TOOL_TURNS=6, bounded Athena polling (~50s), Lambda timeout 120s, Converse maxTokens=1024 and temperature=0.",
+      "content": "Loop and cost bounds: MAX_TOOL_TURNS=6, a 22-second response deadline with StopQueryExecution on expiry, a 29-second Lambda timeout, an Athena bytesScannedCutoffPerQuery, Converse maxTokens=1024.",
       "status": "mitigationResolved"
     },
     {

@@ -9,18 +9,19 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
+    "test": "tsc && node --test test/*.test.js",
     "synth": "cdk synth",
     "deploy": "cdk deploy --all"
   },
   "devDependencies": {
     "@types/node": "20.14.9",
-    "aws-cdk": "^2.1143.0",
+    "aws-cdk": "^2.1148.0",
     "cdk-nag": "^3.0.2",
     "ts-node": "10.9.2",
     "typescript": "5.5.3"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.270.0",
+    "aws-cdk-lib": "^2.275.0",
     "constructs": "^10.5.1",
     "source-map-support": "0.5.21"
   }

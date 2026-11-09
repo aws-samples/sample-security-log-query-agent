@@ -20,8 +20,8 @@ export interface LogArchiveGrantStackProps extends cdk.StackProps {
   readonly roleName: string;
   /** Glue database name for the central log catalog. */
   readonly glueDatabase: string;
-  /** Override for the central log bucket name (defaults to the LZA convention). */
-  readonly centralBucketName?: string;
+  /** Name of the central log bucket (the same value the app stack's role is scoped to). */
+  readonly centralBucketName: string;
 }
 
 /**
@@ -45,8 +45,10 @@ export class LogArchiveGrantStack extends cdk.Stack {
     const dbName = props.glueDatabase;
     const orgId = props.orgId;
     const queryRoleArn = `arn:${this.partition}:iam::${queryAccount}:role/${roleName}`;
-    // Landing-zone-managed central log bucket convention: aws-accelerator-central-logs-<acct>-<region>
-    const centralBucket = props.centralBucketName ?? `aws-accelerator-central-logs-${this.account}-${this.region}`;
+    // Landing-zone-managed central log bucket. bin/app.ts defaults it to the LZA naming
+    // convention (aws-accelerator-central-logs-<acct>-<region>) and passes the same value
+    // to the app stack.
+    const centralBucket = props.centralBucketName;
 
     // ---- Glue Data Catalog database over the central logs ----
     const db = new glue.CfnDatabase(this, 'CentralLogsDb', {
